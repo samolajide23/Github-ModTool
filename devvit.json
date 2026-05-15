@@ -1,0 +1,147 @@
+{
+  "$schema": "https://developers.reddit.com/schema/config-file.v1.json",
+  "name": "queue-toolk",
+  "post": {
+    "dir": "dist/client",
+    "entrypoints": {
+      "default": {
+        "entry": "dashboard.html",
+        "height": "tall",
+        "inline": true
+      }
+    }
+  },
+  "server": {
+    "dir": "dist/server",
+    "entry": "index.cjs"
+  },
+  "menu": {
+    "items": [
+      {
+        "label": "Configure QueueIQ settings",
+        "description": "How to open Install settings (keywords, weights, karma threshold).",
+        "location": "subreddit",
+        "forUserType": "moderator",
+        "endpoint": "/internal/menu/configure-settings"
+      },
+      {
+        "label": "Open QueueIQ dashboard (custom UI)",
+        "description": "Opens the React card dashboard inside a Devvit post (not a text popup).",
+        "location": "subreddit",
+        "forUserType": "moderator",
+        "endpoint": "/internal/menu/open-dashboard"
+      },
+      {
+        "label": "View prioritized mod queue",
+        "description": "See mod queue items sorted by urgency score (most urgent first).",
+        "location": "subreddit",
+        "forUserType": "moderator",
+        "endpoint": "/internal/menu/view-prioritized-queue"
+      },
+      {
+        "label": "Refresh prioritized queue",
+        "description": "Re-score every item in the mod queue using QueueIQ logic.",
+        "location": "subreddit",
+        "forUserType": "moderator",
+        "endpoint": "/internal/menu/refresh-queue"
+      },
+      {
+        "label": "Seed demo mod queue",
+        "description": "Create sample posts, comments, and reports for testing QueueIQ.",
+        "location": "subreddit",
+        "forUserType": "moderator",
+        "endpoint": "/internal/menu/seed-demo"
+      },
+      {
+        "label": "Review top priority item",
+        "description": "Jump to the highest-scoring item in your mod queue.",
+        "location": "subreddit",
+        "forUserType": "moderator",
+        "endpoint": "/internal/menu/review-top-priority"
+      },
+      {
+        "label": "QueueIQ score",
+        "description": "See why this post or comment ranks where it does.",
+        "location": [
+          "post",
+          "comment"
+        ],
+        "forUserType": "moderator",
+        "endpoint": "/internal/menu/show-item-score"
+      }
+    ]
+  },
+  "forms": {
+    "prioritizedQueue": "/internal/form/prioritized-queue-submit",
+    "itemScore": "/internal/form/item-score-submit"
+  },
+  "triggers": {
+    "onAppInstall": "/internal/triggers/on-app-install",
+    "onAppUpgrade": "/internal/triggers/on-app-upgrade",
+    "onPostReport": "/internal/triggers/on-post-report",
+    "onCommentReport": "/internal/triggers/on-comment-report"
+  },
+  "scheduler": {
+    "tasks": {
+      "refresh-queue": {
+        "endpoint": "/internal/scheduler/refresh-queue",
+        "cron": "*/5 * * * *"
+      }
+    }
+  },
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite build --watch"
+  },
+  "permissions": {
+    "reddit": {
+      "enable": true,
+      "scope": "moderator",
+      "asUser": ["SUBMIT_POST"]
+    },
+    "redis": true
+  },
+  "settings": {
+    "subreddit": {
+      "bannedKeywords": {
+        "type": "string",
+        "label": "Banned keywords (comma-separated)",
+        "helpText": "Matched against post titles/bodies and comment text. Each match adds +5 to the urgency score.",
+        "defaultValue": "spam, scam, phishing, giveaway, free money"
+      },
+      "lowKarmaThreshold": {
+        "type": "number",
+        "label": "Low karma threshold",
+        "helpText": "Authors below this total karma (link + comment) get +4 urgency.",
+        "defaultValue": 100
+      },
+      "scoreWeightReports": {
+        "type": "number",
+        "label": "Points per report",
+        "helpText": "Multiplied by report count. Change here, then refresh the dashboard.",
+        "defaultValue": 3
+      },
+      "scoreWeightKeywords": {
+        "type": "number",
+        "label": "Points per banned keyword",
+        "helpText": "Multiplied by keyword matches in title/body.",
+        "defaultValue": 5
+      },
+      "scoreWeightLowKarma": {
+        "type": "number",
+        "label": "Low-karma author bonus",
+        "helpText": "Flat points when author is below the karma threshold.",
+        "defaultValue": 4
+      },
+      "scoreWeightRepeatReports": {
+        "type": "number",
+        "label": "Points per repeat report",
+        "helpText": "Multiplied by extra report events beyond the first.",
+        "defaultValue": 2
+      }
+    }
+  },
+  "dev": {
+    "subreddit": "queue_toolk_dev"
+  }
+}
