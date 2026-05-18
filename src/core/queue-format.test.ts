@@ -13,6 +13,8 @@ const sampleItem = (total: number, title: string): PrioritizedItem => ({
   title,
   authorName: 'u/mod',
   permalink: 'https://www.reddit.com/r/demo/comments/abc123/demo_post/',
+  locked: false,
+  ignoringReports: false,
   breakdown: {
     reportCount: 1,
     bannedKeywordHits: total > 10 ? 2 : 0,
@@ -23,6 +25,14 @@ const sampleItem = (total: number, title: string): PrioritizedItem => ({
     keywordPoints: total > 10 ? 10 : 0,
     lowKarmaPoints: 0,
     repeatedPoints: 0,
+    queueAgeHours: 0,
+    isYoungAccount: false,
+    modReportCount: 0,
+    flairBonus: 0,
+    queueAgePoints: 0,
+    youngAccountPoints: 0,
+    modReportPoints: 0,
+    flairPoints: 0,
   },
 });
 

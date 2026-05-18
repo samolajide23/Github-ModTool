@@ -5,7 +5,7 @@ export const navigateTo = (url: string): void => {
 
 export const showForm = async (): Promise<{ action: string }> => {
   window.alert(
-    'Local demo: In Reddit, open Mod Tools → Apps → QueueIQ → Settings, or use Configure QueueIQ settings in the mod menu.'
+    'Local demo: In Reddit, open Mod Tools → Apps → QueueIQ → Settings, or use the settings (gear) icon on the QueueIQ dashboard.'
   );
   return { action: 'SUBMITTED' };
 };

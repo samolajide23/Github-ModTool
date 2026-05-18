@@ -18,46 +18,11 @@
   "menu": {
     "items": [
       {
-        "label": "Configure QueueIQ settings",
-        "description": "How to open Install settings (keywords, weights, karma threshold).",
-        "location": "subreddit",
-        "forUserType": "moderator",
-        "endpoint": "/internal/menu/configure-settings"
-      },
-      {
-        "label": "Open QueueIQ dashboard (custom UI)",
-        "description": "Opens the React card dashboard inside a Devvit post (not a text popup).",
+        "label": "Open QueueIQ",
+        "description": "Prioritized mod queue, mod actions, and refresh — in the dashboard post.",
         "location": "subreddit",
         "forUserType": "moderator",
         "endpoint": "/internal/menu/open-dashboard"
-      },
-      {
-        "label": "View prioritized mod queue",
-        "description": "See mod queue items sorted by urgency score (most urgent first).",
-        "location": "subreddit",
-        "forUserType": "moderator",
-        "endpoint": "/internal/menu/view-prioritized-queue"
-      },
-      {
-        "label": "Refresh prioritized queue",
-        "description": "Re-score every item in the mod queue using QueueIQ logic.",
-        "location": "subreddit",
-        "forUserType": "moderator",
-        "endpoint": "/internal/menu/refresh-queue"
-      },
-      {
-        "label": "Seed demo mod queue",
-        "description": "Create sample posts, comments, and reports for testing QueueIQ.",
-        "location": "subreddit",
-        "forUserType": "moderator",
-        "endpoint": "/internal/menu/seed-demo"
-      },
-      {
-        "label": "Review top priority item",
-        "description": "Jump to the highest-scoring item in your mod queue.",
-        "location": "subreddit",
-        "forUserType": "moderator",
-        "endpoint": "/internal/menu/review-top-priority"
       },
       {
         "label": "QueueIQ score",
@@ -72,7 +37,6 @@
     ]
   },
   "forms": {
-    "prioritizedQueue": "/internal/form/prioritized-queue-submit",
     "itemScore": "/internal/form/item-score-submit"
   },
   "triggers": {
@@ -106,37 +70,79 @@
       "bannedKeywords": {
         "type": "string",
         "label": "Banned keywords (comma-separated)",
-        "helpText": "Matched against post titles/bodies and comment text. Each match adds +5 to the urgency score.",
+        "helpText": "Matched against post titles/bodies and comment text. Each match is scored using Points per banned keyword below.",
         "defaultValue": "spam, scam, phishing, giveaway, free money"
       },
       "lowKarmaThreshold": {
         "type": "number",
         "label": "Low karma threshold",
-        "helpText": "Authors below this total karma (link + comment) get +4 urgency.",
+        "helpText": "Authors below this total karma (link + comment) receive the Low-karma author bonus below.",
         "defaultValue": 100
       },
       "scoreWeightReports": {
         "type": "number",
         "label": "Points per report",
-        "helpText": "Multiplied by report count. Change here, then refresh the dashboard.",
+        "helpText": "Multiplied by report count (decimals allowed, e.g. 2.5). Change here, then refresh the dashboard.",
         "defaultValue": 3
       },
       "scoreWeightKeywords": {
         "type": "number",
         "label": "Points per banned keyword",
-        "helpText": "Multiplied by keyword matches in title/body.",
+        "helpText": "Multiplied by keyword matches in title/body (decimals allowed).",
         "defaultValue": 5
       },
       "scoreWeightLowKarma": {
         "type": "number",
         "label": "Low-karma author bonus",
-        "helpText": "Flat points when author is below the karma threshold.",
+        "helpText": "Flat points when author is below the karma threshold (decimals allowed).",
         "defaultValue": 4
       },
       "scoreWeightRepeatReports": {
         "type": "number",
         "label": "Points per repeat report",
-        "helpText": "Multiplied by extra report events beyond the first.",
+        "helpText": "Multiplied by extra report events beyond the first (decimals allowed).",
+        "defaultValue": 2
+      },
+      "scoreWeightQueueAge": {
+        "type": "number",
+        "label": "Points per hour in queue",
+        "helpText": "Older mod-queue items score higher, capped at 7 days (decimals allowed).",
+        "defaultValue": 1
+      },
+      "scoreWeightYoungAccount": {
+        "type": "number",
+        "label": "Young account bonus",
+        "helpText": "Flat bonus when author account is newer than the threshold below (decimals allowed).",
+        "defaultValue": 3
+      },
+      "youngAccountMaxDays": {
+        "type": "number",
+        "label": "Young account max age (days)",
+        "helpText": "Authors with accounts newer than this many days get the young-account bonus.",
+        "defaultValue": 7
+      },
+      "scoreWeightModReports": {
+        "type": "number",
+        "label": "Points per mod report",
+        "helpText": "Bonus when moderators (not users) reported the item (decimals allowed).",
+        "defaultValue": 5
+      },
+      "flairWeightRules": {
+        "type": "string",
+        "label": "Flair bonus rules",
+        "helpText": "Comma-separated flair:points pairs, e.g. News:10.5, Meme:2.5. Matches post flair text.",
+        "defaultValue": ""
+      },
+      "autoRemoveAboveScore": {
+        "type": "number",
+        "label": "Auto-remove at score (0 = off)",
+        "helpText": "If greater than 0, each queue refresh may REMOVE mod-queue items whose QueueIQ total score is at or above this number (decimals allowed, max 500). Uses normal remove + mod note. Caps at 15 items per refresh. False positives are possible — start high, use Min reports below, and watch the audit log.",
+        "defaultValue": 0
+      },
+      "autoRemoveMinReports": {
+        "type": "number",
+        "label": "Auto-remove: min user reports",
+        "helpText": "Only when auto-remove score is enabled. Require at least this many user reports before auto-removing (0 = score only, higher false-positive risk).",
         "defaultValue": 2
       }
     }

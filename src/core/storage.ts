@@ -24,6 +24,10 @@ export const snapshotFromPost = (post: PostV2): StoredSnapshot => {
     permalink: post.permalink,
     reportCount: post.numReports ?? 1,
     text: `${post.title}\n${post.selftext ?? ''}`,
+    locked: post.isLocked,
+    createdAtMs: post.createdAt ? post.createdAt * 1000 : undefined,
+    flairText: post.linkFlair?.text,
+    modReportCount: 0,
   };
 };
 
@@ -38,6 +42,9 @@ export const snapshotFromComment = (comment: CommentV2): StoredSnapshot => {
     permalink: comment.permalink,
     reportCount: comment.numReports ?? 1,
     text: comment.body,
+    locked: false,
+    createdAtMs: comment.createdAt ? comment.createdAt * 1000 : undefined,
+    modReportCount: 0,
   };
 };
 

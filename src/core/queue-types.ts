@@ -8,6 +8,9 @@ export type PrioritizedItem = {
   title: string;
   authorName: string;
   permalink: string;
+  locked: boolean;
+  ignoringReports: boolean;
+  flairText?: string;
   breakdown: ScoreBreakdown;
 };
 
@@ -19,4 +22,10 @@ export type StoredSnapshot = {
   permalink: string;
   reportCount: number;
   text: string;
+  locked?: boolean;
+  ignoringReports?: boolean;
+  /** Unix ms when the post/comment was created. */
+  createdAtMs?: number;
+  flairText?: string;
+  modReportCount?: number;
 };

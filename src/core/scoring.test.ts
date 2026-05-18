@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { DEFAULT_SCORE_WEIGHTS } from './constants.js';
 import {
   computeScore,
   countBannedKeywordHits,
@@ -31,10 +32,32 @@ describe('computeScore', () => {
       bannedKeywordHits: 1,
       isLowKarmaAuthor: true,
       repeatedReportBonus: 2,
+      queueAgeHours: 0,
+      isYoungAccount: false,
+      modReportCount: 0,
+      flairBonus: 0,
     });
 
     expect(breakdown.total).toBe(3 * 3 + 1 * 5 + 4 + 2 * 2);
     expect(breakdown.total).toBe(22);
+  });
+
+  it('applies decimal weights', () => {
+    const breakdown = computeScore(
+      {
+        reportCount: 2,
+        bannedKeywordHits: 0,
+        isLowKarmaAuthor: false,
+        repeatedReportBonus: 0,
+        queueAgeHours: 0,
+        isYoungAccount: false,
+        modReportCount: 0,
+        flairBonus: 0,
+      },
+      { ...DEFAULT_SCORE_WEIGHTS, reports: 2.5 }
+    );
+    expect(breakdown.reportsPoints).toBe(5);
+    expect(breakdown.total).toBe(5);
   });
 });
 
@@ -46,6 +69,10 @@ describe('formatScoreBreakdownShort', () => {
         bannedKeywordHits: 2,
         isLowKarmaAuthor: false,
         repeatedReportBonus: 0,
+        queueAgeHours: 0,
+        isYoungAccount: false,
+        modReportCount: 0,
+        flairBonus: 0,
       })
     );
 

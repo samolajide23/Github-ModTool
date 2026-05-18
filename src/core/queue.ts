@@ -4,14 +4,18 @@ import { isT1, isT3 } from '@devvit/shared-types/tid.js';
 import { loadQueueConfig, type QueueConfig } from './config.js';
 import { BUNDLED_DEMO_SNAPSHOTS } from './demo-snapshots.generated.js';
 import { REDIS_KEYS } from './constants.js';
+import { isYoungAccount } from './author-signals.js';
+import { flairBonusFromRules } from './flair-rules.js';
 import {
   computeScore,
   countBannedKeywordHits,
   formatScoreBreakdown,
   formatScoreBreakdownShort,
+  queueAgeHoursFromCreatedAt,
   repeatedReportBonus,
   type ScoreBreakdown,
 } from './scoring.js';
+import { applyAutoRemoveByScore } from './auto-remove-by-score.js';
 import {
   loadTrackedSnapshots,
   trackSnapshot,
@@ -81,22 +85,33 @@ const getReportHits = async (thingId: string, reportCount: number): Promise<numb
   }
 };
 
+const buildScoreInputFromSnapshot = async (
+  snap: StoredSnapshot,
+  config: QueueConfig
+) => {
+  const reportHits = await getReportHits(snap.id, snap.reportCount);
+  const isLowKarma = await isLowKarmaAuthor(snap.authorName, config.lowKarmaThreshold);
+  const young = await isYoungAccount(snap.authorName, config.youngAccountMaxDays);
+  const flairBonus = flairBonusFromRules(snap.flairText, config.flairRules);
+
+  return {
+    reportCount: snap.reportCount,
+    bannedKeywordHits: countBannedKeywordHits(snap.text, config.bannedKeywords),
+    isLowKarmaAuthor: isLowKarma,
+    repeatedReportBonus: repeatedReportBonus(reportHits, snap.reportCount),
+    queueAgeHours: queueAgeHoursFromCreatedAt(snap.createdAtMs),
+    isYoungAccount: young,
+    modReportCount: snap.modReportCount ?? 0,
+    flairBonus,
+  };
+};
+
 const scoreSnapshot = async (
   snap: StoredSnapshot,
   config: QueueConfig
 ): Promise<ScoreBreakdown> => {
-  const reportHits = await getReportHits(snap.id, snap.reportCount);
-  const isLowKarma = await isLowKarmaAuthor(snap.authorName, config.lowKarmaThreshold);
-
-  return computeScore(
-    {
-      reportCount: snap.reportCount,
-      bannedKeywordHits: countBannedKeywordHits(snap.text, config.bannedKeywords),
-      isLowKarmaAuthor: isLowKarma,
-      repeatedReportBonus: repeatedReportBonus(reportHits, snap.reportCount),
-    },
-    config.weights
-  );
+  const input = await buildScoreInputFromSnapshot(snap, config);
+  return computeScore(input, config.weights);
 };
 
 export const scoreQueueItemId = async (
@@ -124,6 +139,13 @@ export const scoreQueueItemId = async (
   return undefined;
 };
 
+const getFlairFromThing = (thing: Post | Comment): string | undefined => {
+  if ('title' in thing) {
+    return thing.flair?.text ?? thing.flairText;
+  }
+  return thing.authorFlair?.text;
+};
+
 export const scoreQueueThing = async (
   thing: Post | Comment,
   config: QueueConfig
@@ -135,6 +157,10 @@ export const scoreQueueThing = async (
     config.bannedKeywords
   );
   const isLowKarma = await isLowKarmaAuthor(thing.authorName, config.lowKarmaThreshold);
+  const young = await isYoungAccount(thing.authorName, config.youngAccountMaxDays);
+  const flairText = getFlairFromThing(thing);
+  const modReportCount = thing.modReportReasons?.length ?? 0;
+  const createdAtMs = thing.createdAt?.getTime();
 
   return computeScore(
     {
@@ -142,6 +168,10 @@ export const scoreQueueThing = async (
       bannedKeywordHits,
       isLowKarmaAuthor: isLowKarma,
       repeatedReportBonus: repeatedReportBonus(reportHits, reportCount),
+      queueAgeHours: queueAgeHoursFromCreatedAt(createdAtMs),
+      isYoungAccount: young,
+      modReportCount,
+      flairBonus: flairBonusFromRules(flairText, config.flairRules),
     },
     config.weights
   );
@@ -156,18 +186,30 @@ export const toPrioritizedItem = (
   title: snap.title,
   authorName: snap.authorName,
   permalink: snap.permalink,
+  locked: snap.locked ?? false,
+  ignoringReports: snap.ignoringReports ?? false,
+  flairText: snap.flairText,
   breakdown,
 });
 
-const thingToSnapshot = (thing: Post | Comment): StoredSnapshot => ({
-  id: thing.id,
-  kind: isT1(thing.id) ? 'comment' : 'post',
-  title: getDisplayTitle(thing),
-  authorName: thing.authorName,
-  permalink: thing.permalink,
-  reportCount: getReportCount(thing),
-  text: getSearchableText(thing),
-});
+const thingToSnapshot = (thing: Post | Comment): StoredSnapshot => {
+  const flairText = getFlairFromThing(thing);
+
+  return {
+    id: thing.id,
+    kind: isT1(thing.id) ? 'comment' : 'post',
+    title: getDisplayTitle(thing),
+    authorName: thing.authorName,
+    permalink: thing.permalink,
+    reportCount: getReportCount(thing),
+    text: getSearchableText(thing),
+    locked: thing.locked,
+    ignoringReports: thing.ignoringReports,
+    createdAtMs: thing.createdAt?.getTime(),
+    flairText,
+    modReportCount: thing.modReportReasons?.length ?? 0,
+  };
+};
 
 const dedupeSnapshots = (snapshots: readonly StoredSnapshot[]): StoredSnapshot[] => {
   const seen = new Set<string>();
@@ -333,7 +375,9 @@ const cachePrioritizedQueue = async (scored: PrioritizedItem[]): Promise<void> =
 };
 
 export const prioritizeModQueue = async (): Promise<PrioritizeResult> => {
-  const scored = await buildLivePrioritizedQueue();
+  const { config } = await loadQueueConfig();
+  let scored = await buildLivePrioritizedQueue(undefined, config);
+  scored = await applyAutoRemoveByScore(scored, config);
   await cachePrioritizedQueue(scored);
 
   const subredditName =
@@ -374,7 +418,7 @@ export const formatQueueItemHelp = (item: PrioritizedItem): string =>
 
 export const formatQueueSummary = (items: PrioritizedItem[]): string => {
   if (items.length === 0) {
-    return 'Mod queue is empty in playtest.\n\nIn your terminal run:\n  npm run seed\n  npm run sync-demo\nThen open this menu again.';
+    return 'Mod queue is empty in playtest.\n\nIn your terminal run:\n  npm run seed\n  npm run sync-demo\nThen open QueueIQ from the mod menu again.';
   }
 
   return items
