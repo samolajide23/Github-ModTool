@@ -11,6 +11,13 @@ import {
 import { formatWeightRule } from '../shared/format-weight-rule.js';
 import { formatScoreBreakdownLines } from '../shared/format-score-breakdown.js';
 import { formatScoreNumber, roundScoreValue } from '../shared/format-score-number.js';
+import {
+  DEFAULT_QUEUE_SORT,
+  QUEUE_SORT_OPTIONS,
+  queueSortSubtitle,
+  sortQueueItems,
+  type QueueSortMode,
+} from '../shared/sort-queue-items.js';
 import { ModActionDialog, type ConfirmableAction } from './components/ModActionDialog.js';
 import { Toast } from './components/Toast.js';
 import { openInstallSettingsHelp } from './open-settings-help.js';
@@ -45,13 +52,17 @@ type PendingConfirm = {
 const QueueFilters = ({
   kindFilter,
   minScore,
+  sortMode,
   onKindChange,
   onMinScoreChange,
+  onSortChange,
 }: {
   kindFilter: KindFilter;
   minScore: number;
+  sortMode: QueueSortMode;
   onKindChange: (v: KindFilter) => void;
   onMinScoreChange: (v: number) => void;
+  onSortChange: (v: QueueSortMode) => void;
 }) => {
   const onPostsClick = () => {
     onKindChange(kindFilter === 'post' ? 'all' : 'post');
@@ -87,6 +98,23 @@ const QueueFilters = ({
         >
           Comments
         </button>
+      </div>
+      <div className="queue-filters__sort">
+        <label className="queue-filters__sort-label" htmlFor="queue-sort-select">
+          Sort
+        </label>
+        <select
+          id="queue-sort-select"
+          className="queue-filters__sort-select"
+          value={sortMode}
+          onChange={(e) => onSortChange(e.target.value as QueueSortMode)}
+        >
+          {QUEUE_SORT_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
       </div>
       <div className="queue-filters__min-score">
         <div className="queue-filters__min-score-head">
@@ -456,6 +484,7 @@ const DashboardView = ({
 }: DashboardViewProps) => {
   const [kindFilter, setKindFilter] = useState<KindFilter>('all');
   const [minScore, setMinScore] = useState(0);
+  const [sortMode, setSortMode] = useState<QueueSortMode>(DEFAULT_QUEUE_SORT);
   const [visibleLimit, setVisibleLimit] = useState(QUEUE_PAGE_SIZE);
   const [pending, setPending] = useState<PendingConfirm | null>(null);
 
@@ -466,19 +495,20 @@ const DashboardView = ({
 
   useEffect(() => {
     setVisibleLimit(QUEUE_PAGE_SIZE);
-  }, [data?.refreshedAt, kindFilter, minScore]);
+  }, [data?.refreshedAt, kindFilter, minScore, sortMode]);
 
   const filteredItems = useMemo(() => {
     if (!data) {
       return [];
     }
-    return data.items.filter((item) => {
+    const filtered = data.items.filter((item) => {
       if (kindFilter !== 'all' && item.kind !== kindFilter) {
         return false;
       }
       return item.breakdown.total >= minScore;
     });
-  }, [data, kindFilter, minScore]);
+    return sortQueueItems(filtered, sortMode);
+  }, [data, kindFilter, minScore, sortMode]);
 
   const visibleItems = useMemo(
     () => filteredItems.slice(0, visibleLimit),
@@ -572,13 +602,19 @@ const DashboardView = ({
         </p>
       )}
 
-      <ToolSection id="priority-queue" title="Queue" subtitle="Highest scores first">
+      <ToolSection
+        id="priority-queue"
+        title="Queue"
+        subtitle={queueSortSubtitle(sortMode)}
+      >
         {!loading && data && (
           <QueueFilters
             kindFilter={kindFilter}
             minScore={minScore}
+            sortMode={sortMode}
             onKindChange={setKindFilter}
             onMinScoreChange={setMinScore}
+            onSortChange={setSortMode}
           />
         )}
 

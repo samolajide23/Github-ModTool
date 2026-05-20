@@ -14,7 +14,12 @@ import { loadQueueConfig } from '../core/config.js';
 import { getInstallSettingsUrl } from '../core/install-settings-url.js';
 import { isModActionKind, isQueueThingId, performModAction } from '../core/mod-actions.js';
 import { buildMockPrioritizedQueue } from '../core/mock-queue.js';
-import { buildLivePrioritizedQueue, prioritizeModQueue } from '../core/queue.js';
+import {
+  buildLivePrioritizedQueue,
+  loadCachedPrioritizedQueue,
+  prioritizeModQueue,
+} from '../core/queue.js';
+import { writeQueueCache } from '../core/queue-cache.js';
 import { toQueueItemDto } from '../core/queue-dto.js';
 import { loadRemovalReasons } from '../core/removal-reasons.js';
 import { ModGuardError, requireSubredditModerator } from '../core/mod-guard.js';
@@ -57,37 +62,45 @@ const toSettingsDto = (
   autoRemoveMinReports: config.autoRemoveMinReports,
 });
 
-const loadQueuePayload = async (): Promise<QueueResponse> => {
-  const { config, fromInstall } = await loadQueueConfig();
-  const scored = await buildLivePrioritizedQueue(undefined, config);
-  const items = scored.slice(0, QUEUE_FETCH_LIMIT);
-  const subredditId = context.subredditId;
-  let refreshedAt: string | null = null;
-
-  if (subredditId) {
-    refreshedAt =
-      (await redis.get(REDIS_KEYS.lastRefresh(subredditId)).catch(() => null)) ??
-      null;
-  }
-
-  if (!refreshedAt) {
-    refreshedAt = new Date().toISOString();
-  }
-
+const loadQueuePayload = async (options?: { forceRebuild?: boolean }): Promise<QueueResponse> => {
   const subredditName = context.subredditName ?? 'unknown';
+
+  const [{ config, fromInstall }, removalReasons, auditLog, cached] = await Promise.all([
+    loadQueueConfig(),
+    loadRemovalReasons(subredditName),
+    loadAuditLog(25),
+    options?.forceRebuild ? Promise.resolve(null) : loadCachedPrioritizedQueue(),
+  ]);
+
+  let items = cached?.items ?? [];
+  let totalInQueue = cached?.totalInQueue ?? 0;
+  let refreshedAt = cached?.refreshedAt ?? null;
+
+  if (!cached) {
+    const scored = await buildLivePrioritizedQueue(undefined, config);
+    await writeQueueCache(scored);
+    items = scored.slice(0, QUEUE_FETCH_LIMIT);
+    totalInQueue = scored.length;
+    refreshedAt = new Date().toISOString();
+    if (context.subredditId) {
+      await redis
+        .set(REDIS_KEYS.lastRefresh(context.subredditId), refreshedAt)
+        .catch(() => undefined);
+    }
+  }
 
   return {
     type: 'queue',
     appVersion: context.appVersion ?? 'unknown',
     subredditName,
-    totalInQueue: scored.length,
-    itemCount: scored.length,
+    totalInQueue,
+    itemCount: totalInQueue,
     refreshedAt,
     settings: toSettingsDto(config),
     settingsUrl: getInstallSettingsUrl(subredditName),
     settingsFromInstall: fromInstall,
-    removalReasons: await loadRemovalReasons(subredditName),
-    auditLog: await loadAuditLog(25),
+    removalReasons,
+    auditLog,
     items: items.map(toQueueItemDto),
   };
 };
@@ -133,7 +146,7 @@ api.get('/queue', async (c) => {
 api.post('/refresh', async (c) => {
   try {
     await prioritizeModQueue();
-    return c.json(await loadQueuePayload());
+    return c.json(await loadQueuePayload({ forceRebuild: false }));
   } catch (error) {
     console.error('POST /api/refresh failed', error);
     return c.json<QueueErrorResponse>(
@@ -183,7 +196,7 @@ api.post('/items/action', async (c) => {
           : undefined,
     });
     await prioritizeModQueue();
-    const queue = await loadQueuePayload();
+    const queue = await loadQueuePayload({ forceRebuild: false });
     return c.json({
       type: 'mod-action',
       action,

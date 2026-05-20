@@ -23,6 +23,9 @@ export const DEFAULT_YOUNG_ACCOUNT_MAX_DAYS = 7;
 export const DEFAULT_FLAIR_RULES = '';
 export const MAX_QUEUE_AGE_HOURS = 168;
 
+/** Max parallel Reddit/Redis lookups when scoring queue items. */
+export const QUEUE_SCORE_CONCURRENCY = 12;
+
 /** @deprecated Use DEFAULT_SCORE_WEIGHTS or loaded config weights */
 export const SCORE_WEIGHTS = DEFAULT_SCORE_WEIGHTS;
 

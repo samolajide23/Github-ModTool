@@ -4,7 +4,10 @@ import { isT1, isT3 } from '@devvit/shared-types/tid.js';
 import { loadQueueConfig, type QueueConfig } from './config.js';
 import { BUNDLED_DEMO_SNAPSHOTS } from './demo-snapshots.generated.js';
 import { REDIS_KEYS } from './constants.js';
-import { isYoungAccount } from './author-signals.js';
+import { resolveAuthorSignals, type AuthorSignals } from './author-signals.js';
+import { mapPool } from './map-pool.js';
+import { readQueueCache, writeQueueCache } from './queue-cache.js';
+import { QUEUE_SCORE_CONCURRENCY } from './constants.js';
 import { flairBonusFromRules } from './flair-rules.js';
 import {
   computeScore,
@@ -54,27 +57,6 @@ const getDisplayTitle = (thing: Post | Comment): string => {
   return preview ? `Comment: ${preview}` : 'Comment in mod queue';
 };
 
-const isLowKarmaAuthor = async (
-  authorName: string | undefined,
-  threshold: number
-): Promise<boolean> => {
-  const username = authorName?.replace(/^u\//, '');
-  if (!username || username === '[deleted]' || username === 'unknown') {
-    return false;
-  }
-
-  try {
-    const user = await reddit.getUserByUsername(username);
-    if (!user) {
-      return true;
-    }
-
-    return user.linkKarma + user.commentKarma < threshold;
-  } catch {
-    return false;
-  }
-};
-
 const getReportHits = async (thingId: string, reportCount: number): Promise<number> => {
   try {
     const stored = await redis.get(REDIS_KEYS.reportHits(thingId));
@@ -87,11 +69,16 @@ const getReportHits = async (thingId: string, reportCount: number): Promise<numb
 
 const buildScoreInputFromSnapshot = async (
   snap: StoredSnapshot,
-  config: QueueConfig
+  config: QueueConfig,
+  authorCache: Map<string, AuthorSignals>
 ) => {
   const reportHits = await getReportHits(snap.id, snap.reportCount);
-  const isLowKarma = await isLowKarmaAuthor(snap.authorName, config.lowKarmaThreshold);
-  const young = await isYoungAccount(snap.authorName, config.youngAccountMaxDays);
+  const { isLowKarma, isYoung } = await resolveAuthorSignals(
+    snap.authorName,
+    config.lowKarmaThreshold,
+    config.youngAccountMaxDays,
+    authorCache
+  );
   const flairBonus = flairBonusFromRules(snap.flairText, config.flairRules);
 
   return {
@@ -100,7 +87,7 @@ const buildScoreInputFromSnapshot = async (
     isLowKarmaAuthor: isLowKarma,
     repeatedReportBonus: repeatedReportBonus(reportHits, snap.reportCount),
     queueAgeHours: queueAgeHoursFromCreatedAt(snap.createdAtMs),
-    isYoungAccount: young,
+    isYoungAccount: isYoung,
     modReportCount: snap.modReportCount ?? 0,
     flairBonus,
   };
@@ -108,9 +95,10 @@ const buildScoreInputFromSnapshot = async (
 
 const scoreSnapshot = async (
   snap: StoredSnapshot,
-  config: QueueConfig
+  config: QueueConfig,
+  authorCache: Map<string, AuthorSignals>
 ): Promise<ScoreBreakdown> => {
-  const input = await buildScoreInputFromSnapshot(snap, config);
+  const input = await buildScoreInputFromSnapshot(snap, config, authorCache);
   return computeScore(input, config.weights);
 };
 
@@ -133,7 +121,7 @@ export const scoreQueueItemId = async (
 
   const bundled = getBundledSnapshots().find((snap) => snap.id === targetId);
   if (bundled) {
-    return scoreSnapshot(bundled, cfg);
+    return scoreSnapshot(bundled, cfg, new Map());
   }
 
   return undefined;
@@ -156,8 +144,13 @@ export const scoreQueueThing = async (
     getSearchableText(thing),
     config.bannedKeywords
   );
-  const isLowKarma = await isLowKarmaAuthor(thing.authorName, config.lowKarmaThreshold);
-  const young = await isYoungAccount(thing.authorName, config.youngAccountMaxDays);
+  const authorCache = new Map<string, AuthorSignals>();
+  const { isLowKarma, isYoung } = await resolveAuthorSignals(
+    thing.authorName,
+    config.lowKarmaThreshold,
+    config.youngAccountMaxDays,
+    authorCache
+  );
   const flairText = getFlairFromThing(thing);
   const modReportCount = thing.modReportReasons?.length ?? 0;
   const createdAtMs = thing.createdAt?.getTime();
@@ -169,7 +162,7 @@ export const scoreQueueThing = async (
       isLowKarmaAuthor: isLowKarma,
       repeatedReportBonus: repeatedReportBonus(reportHits, reportCount),
       queueAgeHours: queueAgeHoursFromCreatedAt(createdAtMs),
-      isYoungAccount: young,
+      isYoungAccount: isYoung,
       modReportCount,
       flairBonus: flairBonusFromRules(flairText, config.flairRules),
     },
@@ -279,9 +272,9 @@ const fetchQueueSnapshots = async (): Promise<StoredSnapshot[]> => {
     const fromApi = await fetchFromModQueueApi();
     if (fromApi.length > 0) {
       console.log(`QueueIQ: loaded ${fromApi.length} item(s) from mod queue API`);
-      for (const snap of fromApi) {
-        await trackSnapshot(snap);
-      }
+      void Promise.all(fromApi.map((snap) => trackSnapshot(snap))).catch((error) => {
+        console.error('trackSnapshot batch failed', error);
+      });
       return fromApi;
     }
   } catch (apiError) {
@@ -298,9 +291,9 @@ const fetchQueueSnapshots = async (): Promise<StoredSnapshot[]> => {
   const fromIds = await fetchByIds(bundled.length > 0 ? bundled.map((s) => s.id) : []);
   if (fromIds.length > 0) {
     console.log(`QueueIQ: loaded ${fromIds.length} item(s) via getPostById fallback`);
-    for (const snap of fromIds) {
-      await trackSnapshot(snap);
-    }
+    void Promise.all(fromIds.map((snap) => trackSnapshot(snap))).catch((error) => {
+      console.error('trackSnapshot batch failed', error);
+    });
     return fromIds;
   }
 
@@ -322,13 +315,12 @@ export const buildLivePrioritizedQueue = async (
   const baseConfig = (await loadQueueConfig()).config;
   const config = { ...baseConfig, ...configOverride };
   const snapshots = await fetchQueueSnapshots();
+  const authorCache = new Map<string, AuthorSignals>();
 
-  const scored: PrioritizedItem[] = [];
-
-  for (const snap of snapshots) {
-    const breakdown = await scoreSnapshot(snap, config);
-    scored.push(toPrioritizedItem(snap, breakdown));
-  }
+  const scored = await mapPool(snapshots, QUEUE_SCORE_CONCURRENCY, async (snap) => {
+    const breakdown = await scoreSnapshot(snap, config, authorCache);
+    return toPrioritizedItem(snap, breakdown);
+  });
 
   scored.sort((a, b) => b.breakdown.total - a.breakdown.total);
 
@@ -369,9 +361,27 @@ const cachePrioritizedQueue = async (scored: PrioritizedItem[]): Promise<void> =
     }
 
     await redis.set(REDIS_KEYS.lastRefresh(subredditId), new Date().toISOString());
+    await writeQueueCache(scored);
   } catch (error) {
     console.error('Redis cache skipped', error);
   }
+};
+
+/** Fast path: return cached prioritized items when scheduler/refresh already ran. */
+export const loadCachedPrioritizedQueue = async (): Promise<{
+  items: PrioritizedItem[];
+  totalInQueue: number;
+  refreshedAt: string;
+} | null> => {
+  const cached = await readQueueCache();
+  if (!cached) {
+    return null;
+  }
+  return {
+    items: cached.items,
+    totalInQueue: cached.totalInQueue,
+    refreshedAt: cached.refreshedAt,
+  };
 };
 
 export const prioritizeModQueue = async (): Promise<PrioritizeResult> => {
