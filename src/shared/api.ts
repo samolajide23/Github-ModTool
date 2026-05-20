@@ -82,6 +82,9 @@ export type QueueResponse = {
   /** Devvit app version serving this response (from install / upload). */
   appVersion: string;
   subredditName: string;
+  /** Total prioritized items in the mod queue (may exceed `items.length`). */
+  totalInQueue: number;
+  /** @deprecated Prefer `totalInQueue`. Kept for older clients. */
   itemCount: number;
   refreshedAt: string | null;
   settings: QueueSettingsDto;
@@ -91,6 +94,12 @@ export type QueueResponse = {
   auditLog: AuditEntryDto[];
   items: QueueItemDto[];
 };
+
+/** Default number of queue rows shown before "Load more". */
+export const QUEUE_PAGE_SIZE = 25;
+
+/** Max prioritized items returned in one API response. */
+export const QUEUE_FETCH_LIMIT = 50;
 
 export type QueueErrorResponse = {
   type: 'error';

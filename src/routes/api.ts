@@ -7,6 +7,7 @@ import type {
   QueueResponse,
   QueueSettingsDto,
 } from '../shared/api.js';
+import { QUEUE_FETCH_LIMIT } from '../shared/api.js';
 import { loadAuditLog } from '../core/audit-log.js';
 import { REDIS_KEYS } from '../core/constants.js';
 import { loadQueueConfig } from '../core/config.js';
@@ -56,9 +57,10 @@ const toSettingsDto = (
   autoRemoveMinReports: config.autoRemoveMinReports,
 });
 
-const loadQueuePayload = async (limit = 50): Promise<QueueResponse> => {
+const loadQueuePayload = async (): Promise<QueueResponse> => {
   const { config, fromInstall } = await loadQueueConfig();
-  const items = await buildLivePrioritizedQueue(limit, config);
+  const scored = await buildLivePrioritizedQueue(undefined, config);
+  const items = scored.slice(0, QUEUE_FETCH_LIMIT);
   const subredditId = context.subredditId;
   let refreshedAt: string | null = null;
 
@@ -78,7 +80,8 @@ const loadQueuePayload = async (limit = 50): Promise<QueueResponse> => {
     type: 'queue',
     appVersion: context.appVersion ?? 'unknown',
     subredditName,
-    itemCount: items.length,
+    totalInQueue: scored.length,
+    itemCount: scored.length,
     refreshedAt,
     settings: toSettingsDto(config),
     settingsUrl: getInstallSettingsUrl(subredditName),
@@ -91,12 +94,14 @@ const loadQueuePayload = async (limit = 50): Promise<QueueResponse> => {
 
 api.get('/queue/mock', async (c) => {
   const { config, fromInstall } = await loadQueueConfig();
-  const items = buildMockPrioritizedQueue(25, config);
+  const scored = buildMockPrioritizedQueue(QUEUE_FETCH_LIMIT, config);
+  const items = scored.slice(0, QUEUE_FETCH_LIMIT);
   return c.json({
     type: 'queue',
     appVersion: 'mock',
     subredditName: 'mock',
-    itemCount: items.length,
+    totalInQueue: scored.length,
+    itemCount: scored.length,
     refreshedAt: new Date().toISOString(),
     settings: toSettingsDto(config),
     settingsUrl: getInstallSettingsUrl('queue_toolk_dev'),
@@ -112,7 +117,7 @@ api.get('/queue/mock', async (c) => {
 
 api.get('/queue', async (c) => {
   try {
-    return c.json(await loadQueuePayload(50));
+    return c.json(await loadQueuePayload());
   } catch (error) {
     console.error('GET /api/queue failed', error);
     return c.json<QueueErrorResponse>(
@@ -128,7 +133,7 @@ api.get('/queue', async (c) => {
 api.post('/refresh', async (c) => {
   try {
     await prioritizeModQueue();
-    return c.json(await loadQueuePayload(50));
+    return c.json(await loadQueuePayload());
   } catch (error) {
     console.error('POST /api/refresh failed', error);
     return c.json<QueueErrorResponse>(
@@ -178,7 +183,7 @@ api.post('/items/action', async (c) => {
           : undefined,
     });
     await prioritizeModQueue();
-    const queue = await loadQueuePayload(50);
+    const queue = await loadQueuePayload();
     return c.json({
       type: 'mod-action',
       action,

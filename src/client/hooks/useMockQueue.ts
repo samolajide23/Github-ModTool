@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import {
   DEFAULT_SCORE_WEIGHTS,
+  QUEUE_FETCH_LIMIT,
   type ModActionKind,
   type ModActionOptions,
   type QueueResponse,
@@ -21,13 +22,14 @@ const ACTION_LABELS: Record<ModActionKind, string> = {
   'ban-user': 'Banned user',
 };
 
-const buildMockResponse = (itemCount = 25): QueueResponse => {
+const buildMockResponse = (itemCount = QUEUE_FETCH_LIMIT): QueueResponse => {
   const weights = { ...DEFAULT_SCORE_WEIGHTS };
   const items = buildMockPrioritizedQueue(itemCount);
   return {
     type: 'queue',
     appVersion: 'local-mock',
     subredditName: 'queue_toolk_dev (mock)',
+    totalInQueue: items.length,
     itemCount: items.length,
     refreshedAt: new Date().toISOString(),
     settings: {
@@ -71,6 +73,7 @@ export const useMockQueue = (onSuccess?: (message: string) => void) => {
           return {
             ...prev,
             items,
+            totalInQueue: items.length,
             itemCount: items.length,
             refreshedAt: new Date().toISOString(),
           };
@@ -85,6 +88,7 @@ export const useMockQueue = (onSuccess?: (message: string) => void) => {
           return {
             ...prev,
             items,
+            totalInQueue: items.length,
             itemCount: items.length,
             refreshedAt: new Date().toISOString(),
           };

@@ -120,7 +120,25 @@ export const buildMockPrioritizedQueue = (
       ? ([...BUNDLED_DEMO_SNAPSHOTS] as StoredSnapshot[])
       : FALLBACK_SNAPSHOTS;
 
-  const scored = source.map((snap) => scoreSnapshotSync(snap, cfg));
+  if (source.length === 0) {
+    return [];
+  }
+
+  const targetCount = limit ?? source.length;
+  const pool: StoredSnapshot[] = [];
+
+  for (let i = 0; i < targetCount; i += 1) {
+    const base = source[i % source.length]!;
+    pool.push({
+      ...base,
+      id: i === 0 ? base.id : `${base.id}__mock_${i}`,
+      title: i === 0 ? base.title : `${base.title} (#${i + 1})`,
+      reportCount: base.reportCount + (i % 4),
+      createdAtMs: (base.createdAtMs ?? Date.now()) - i * 15 * 60 * 1000,
+    });
+  }
+
+  const scored = pool.map((snap) => scoreSnapshotSync(snap, cfg));
   scored.sort((a, b) => b.breakdown.total - a.breakdown.total);
   return limit ? scored.slice(0, limit) : scored;
 };

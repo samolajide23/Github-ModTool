@@ -1,15 +1,15 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { navigateTo } from '@devvit/web/client';
-import type {
-  ModActionKind,
-  ModActionOptions,
-  QueueItemDto,
-  QueueResponse,
-  QueueSettingsDto,
+import {
+  QUEUE_PAGE_SIZE,
+  type ModActionKind,
+  type ModActionOptions,
+  type QueueItemDto,
+  type QueueResponse,
+  type QueueSettingsDto,
 } from '../shared/api.js';
 import { formatWeightRule } from '../shared/format-weight-rule.js';
 import { formatScoreBreakdownLines } from '../shared/format-score-breakdown.js';
-import { formatScoreNumber, roundScoreValue } from '../shared/format-score-number.js';
 import { formatScoreNumber, roundScoreValue } from '../shared/format-score-number.js';
 import { ModActionDialog, type ConfirmableAction } from './components/ModActionDialog.js';
 import { Toast } from './components/Toast.js';
@@ -41,27 +41,6 @@ type PendingConfirm = {
   item: QueueItemDto;
   action: ConfirmableAction;
 };
-
-const ScoreLegend = () => (
-  <ul className="score-legend" aria-label="Score color legend">
-    <li>
-      <span className="score-legend__swatch score-legend__swatch--critical" />
-      <span>20+ Critical — review first</span>
-    </li>
-    <li>
-      <span className="score-legend__swatch score-legend__swatch--high" />
-      <span>10–19 High</span>
-    </li>
-    <li>
-      <span className="score-legend__swatch score-legend__swatch--medium" />
-      <span>5–9 Medium</span>
-    </li>
-    <li>
-      <span className="score-legend__swatch score-legend__swatch--low" />
-      <span>0–4 Low</span>
-    </li>
-  </ul>
-);
 
 const QueueFilters = ({
   kindFilter,
@@ -296,15 +275,29 @@ const SettingsIcon = () => (
   </svg>
 );
 
-const formatQueueMeta = (data: QueueResponse, shown: number): string => {
+const formatQueueMeta = (
+  data: QueueResponse,
+  visibleCount: number,
+  filteredCount: number
+): string => {
+  const totalInQueue = data.totalInQueue ?? data.itemCount;
   const parts = [
     `r/${data.subredditName}`,
-    `${shown} shown`,
-    `v${data.appVersion}`,
+    `${visibleCount} shown`,
   ];
+
+  if (filteredCount !== visibleCount) {
+    parts.push(`${filteredCount} match filters`);
+  }
+
+  parts.push(`${totalInQueue} in queue`);
+
+  parts.push(`v${data.appVersion}`);
+
   if (data.refreshedAt) {
     parts.push(`Updated ${formatRefreshed(data.refreshedAt)}`);
   }
+
   return parts.join(' · ');
 };
 
@@ -463,12 +456,17 @@ const DashboardView = ({
 }: DashboardViewProps) => {
   const [kindFilter, setKindFilter] = useState<KindFilter>('all');
   const [minScore, setMinScore] = useState(0);
+  const [visibleLimit, setVisibleLimit] = useState(QUEUE_PAGE_SIZE);
   const [pending, setPending] = useState<PendingConfirm | null>(null);
 
   useEffect(() => {
     setScrollRootLocked(pending !== null);
     return () => setScrollRootLocked(false);
   }, [pending]);
+
+  useEffect(() => {
+    setVisibleLimit(QUEUE_PAGE_SIZE);
+  }, [data?.refreshedAt, kindFilter, minScore]);
 
   const filteredItems = useMemo(() => {
     if (!data) {
@@ -481,6 +479,15 @@ const DashboardView = ({
       return item.breakdown.total >= minScore;
     });
   }, [data, kindFilter, minScore]);
+
+  const visibleItems = useMemo(
+    () => filteredItems.slice(0, visibleLimit),
+    [filteredItems, visibleLimit]
+  );
+
+  const remainingFiltered = Math.max(0, filteredItems.length - visibleLimit);
+  const totalInQueue = data?.totalInQueue ?? data?.itemCount ?? 0;
+  const hiddenByFetchCap = Math.max(0, totalInQueue - (data?.items.length ?? 0));
 
   const handleConfirm = (options: ModActionOptions) => {
     if (!pending) {
@@ -527,7 +534,7 @@ const DashboardView = ({
             <h1 className="dashboard__title">QueueIQ</h1>
             {!loading && data ? (
               <p className="dashboard__meta">
-                {formatQueueMeta(data, filteredItems.length)}
+                {formatQueueMeta(data, visibleItems.length, filteredItems.length)}
               </p>
             ) : (
               <p className="dashboard__meta">Prioritized mod queue</p>
@@ -566,7 +573,6 @@ const DashboardView = ({
       )}
 
       <ToolSection id="priority-queue" title="Queue" subtitle="Highest scores first">
-        <ScoreLegend />
         {!loading && data && (
           <QueueFilters
             kindFilter={kindFilter}
@@ -593,19 +599,43 @@ const DashboardView = ({
         )}
 
         {!loading && !error && data && filteredItems.length > 0 && (
-          <ol className="queue-list">
-            {filteredItems.map((item) => (
-              <QueueCard
-                key={item.id}
-                item={item}
-                settings={data.settings}
-                mock={mock}
-                acting={actingOnId === item.id}
-                onAction={(id, action, opts) => void performAction(id, action, opts)}
-                onRequestConfirm={(it, action) => setPending({ item: it, action })}
-              />
-            ))}
-          </ol>
+          <>
+            <ol className="queue-list">
+              {visibleItems.map((item) => (
+                <QueueCard
+                  key={item.id}
+                  item={item}
+                  settings={data.settings}
+                  mock={mock}
+                  acting={actingOnId === item.id}
+                  onAction={(id, action, opts) => void performAction(id, action, opts)}
+                  onRequestConfirm={(it, action) => setPending({ item: it, action })}
+                />
+              ))}
+            </ol>
+            {remainingFiltered > 0 && (
+              <div className="queue-load-more">
+                <button
+                  type="button"
+                  className="btn btn--neutral queue-load-more__btn"
+                  onClick={() =>
+                    setVisibleLimit((current) => current + QUEUE_PAGE_SIZE)
+                  }
+                >
+                  Load {Math.min(QUEUE_PAGE_SIZE, remainingFiltered)} more
+                </button>
+                <p className="queue-load-more__hint">
+                  {remainingFiltered} more matching your filters
+                </p>
+              </div>
+            )}
+            {hiddenByFetchCap > 0 && (
+              <p className="queue-load-more__cap">
+                Showing top {data.items.length} of {totalInQueue} queued items. Refresh after
+                clearing the list to load the next batch.
+              </p>
+            )}
+          </>
         )}
       </ToolSection>
 
