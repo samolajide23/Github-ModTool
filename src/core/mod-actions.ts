@@ -42,6 +42,7 @@ export const performModAction = async (
     throw new Error('Invalid queue item id.');
   }
 
+  const thingId = id as `t1_${string}` | `t3_${string}`;
   const subredditName = context.subredditName;
   if (!subredditName) {
     throw new Error('Missing subreddit context.');
@@ -49,32 +50,30 @@ export const performModAction = async (
 
   switch (action) {
     case 'approve':
-      await reddit.approve(id);
+      await reddit.approve(thingId);
       break;
     case 'remove': {
       const thing = await fetchThing(id);
       const rid = options.removalReasonId?.trim() ?? '';
       const mn = options.modNote?.trim();
-      if (rid || mn) {
-        await thing.addRemovalNote({
-          reasonId: rid,
-          modNote: mn ? mn.slice(0, 100) : undefined,
-        });
+      if (rid && mn) {
+        await thing.addRemovalNote({ reasonId: rid, modNote: mn.slice(0, 100) });
+      } else if (rid) {
+        await thing.addRemovalNote({ reasonId: rid });
       }
-      await reddit.remove(id, false);
+      await reddit.remove(thingId, false);
       break;
     }
     case 'spam': {
       const thing = await fetchThing(id);
       const rid = options.removalReasonId?.trim() ?? '';
       const mn = options.modNote?.trim();
-      if (rid || mn) {
-        await thing.addRemovalNote({
-          reasonId: rid,
-          modNote: mn ? mn.slice(0, 100) : undefined,
-        });
+      if (rid && mn) {
+        await thing.addRemovalNote({ reasonId: rid, modNote: mn.slice(0, 100) });
+      } else if (rid) {
+        await thing.addRemovalNote({ reasonId: rid });
       }
-      await reddit.remove(id, true);
+      await reddit.remove(thingId, true);
       break;
     }
     case 'lock':
@@ -99,18 +98,26 @@ export const performModAction = async (
       if (!username || username === '[deleted]') {
         throw new Error('Cannot ban a deleted or unknown author.');
       }
-      const duration =
-        options.banDurationDays && options.banDurationDays > 0
-          ? options.banDurationDays
-          : undefined;
-      await reddit.banUser({
+      const banArgs: {
+        username: string;
+        subredditName: string;
+        context: string;
+        note?: string;
+        reason?: string;
+        duration?: number;
+      } = {
         username,
         subredditName,
-        note: options.note,
-        reason: options.note,
         context: id,
-        duration,
-      });
+      };
+      if (options.note !== undefined) {
+        banArgs.note = options.note;
+        banArgs.reason = options.note;
+      }
+      if (options.banDurationDays !== undefined && options.banDurationDays > 0) {
+        banArgs.duration = options.banDurationDays;
+      }
+      await reddit.banUser(banArgs);
       break;
     }
     default: {

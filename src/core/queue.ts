@@ -12,18 +12,18 @@ import { flairBonusFromRules } from './flair-rules.js';
 import {
   computeScore,
   countBannedKeywordHits,
-  formatScoreBreakdown,
   formatScoreBreakdownShort,
   queueAgeHoursFromCreatedAt,
   repeatedReportBonus,
   type ScoreBreakdown,
 } from './scoring.js';
+import { snapshotToStoredFields, toPrioritizedItem } from './prioritized-item.js';
 import { applyAutoRemoveByScore } from './auto-remove-by-score.js';
 import {
   loadTrackedSnapshots,
   trackSnapshot,
 } from './storage.js';
-import type { PrioritizedItem, QueueItemKind, StoredSnapshot } from './queue-types.js';
+import type { PrioritizedItem, StoredSnapshot } from './queue-types.js';
 import { toRedditUrl } from './urls.js';
 
 export type { QueueItemKind, PrioritizedItem, StoredSnapshot } from './queue-types.js';
@@ -129,7 +129,7 @@ export const scoreQueueItemId = async (
 
 const getFlairFromThing = (thing: Post | Comment): string | undefined => {
   if ('title' in thing) {
-    return thing.flair?.text ?? thing.flairText;
+    return thing.flair?.text;
   }
   return thing.authorFlair?.text;
 };
@@ -170,25 +170,13 @@ export const scoreQueueThing = async (
   );
 };
 
-export const toPrioritizedItem = (
-  snap: StoredSnapshot,
-  breakdown: ScoreBreakdown
-): PrioritizedItem => ({
-  id: snap.id,
-  kind: snap.kind,
-  title: snap.title,
-  authorName: snap.authorName,
-  permalink: snap.permalink,
-  locked: snap.locked ?? false,
-  ignoringReports: snap.ignoringReports ?? false,
-  flairText: snap.flairText,
-  breakdown,
-});
+export { toPrioritizedItem } from './prioritized-item.js';
 
 const thingToSnapshot = (thing: Post | Comment): StoredSnapshot => {
   const flairText = getFlairFromThing(thing);
+  const createdAtMs = thing.createdAt?.getTime();
 
-  return {
+  return snapshotToStoredFields({
     id: thing.id,
     kind: isT1(thing.id) ? 'comment' : 'post',
     title: getDisplayTitle(thing),
@@ -198,10 +186,10 @@ const thingToSnapshot = (thing: Post | Comment): StoredSnapshot => {
     text: getSearchableText(thing),
     locked: thing.locked,
     ignoringReports: thing.ignoringReports,
-    createdAtMs: thing.createdAt?.getTime(),
-    flairText,
+    ...(createdAtMs !== undefined ? { createdAtMs } : {}),
+    ...(flairText !== undefined ? { flairText } : {}),
     modReportCount: thing.modReportReasons?.length ?? 0,
-  };
+  });
 };
 
 const dedupeSnapshots = (snapshots: readonly StoredSnapshot[]): StoredSnapshot[] => {

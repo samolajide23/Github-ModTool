@@ -3,6 +3,7 @@ import type { CommentV2 } from '@devvit/protos/json/devvit/reddit/v2alpha/commen
 import type { PostV2 } from '@devvit/protos/json/devvit/reddit/v2alpha/postv2.js';
 import { T1, T3 } from '@devvit/shared-types/tid.js';
 import { REDIS_KEYS } from './constants.js';
+import { snapshotToStoredFields } from './prioritized-item.js';
 import type { QueueItemKind, StoredSnapshot } from './queue-types.js';
 
 export type { StoredSnapshot } from './queue-types.js';
@@ -15,9 +16,11 @@ const normalizeId = (id: string, kind: QueueItemKind): string => {
 };
 
 export const snapshotFromPost = (post: PostV2): StoredSnapshot => {
-  const id = normalizeId(post.id, 'post');
-  return {
-    id,
+  const createdAtMs = post.createdAt ? post.createdAt * 1000 : undefined;
+  const flairText = post.linkFlair?.text;
+
+  return snapshotToStoredFields({
+    id: normalizeId(post.id, 'post'),
     kind: 'post',
     title: post.title,
     authorName: post.authorId.replace(/^t2_/, 'u/') || 'unknown',
@@ -25,17 +28,18 @@ export const snapshotFromPost = (post: PostV2): StoredSnapshot => {
     reportCount: post.numReports ?? 1,
     text: `${post.title}\n${post.selftext ?? ''}`,
     locked: post.isLocked,
-    createdAtMs: post.createdAt ? post.createdAt * 1000 : undefined,
-    flairText: post.linkFlair?.text,
+    ...(createdAtMs !== undefined ? { createdAtMs } : {}),
+    ...(flairText !== undefined ? { flairText } : {}),
     modReportCount: 0,
-  };
+  });
 };
 
 export const snapshotFromComment = (comment: CommentV2): StoredSnapshot => {
-  const id = normalizeId(comment.id, 'comment');
   const preview = comment.body.replace(/\s+/g, ' ').trim().slice(0, 100);
-  return {
-    id,
+  const createdAtMs = comment.createdAt ? comment.createdAt * 1000 : undefined;
+
+  return snapshotToStoredFields({
+    id: normalizeId(comment.id, 'comment'),
     kind: 'comment',
     title: preview ? `Comment: ${preview}` : 'Comment in mod queue',
     authorName: comment.author || 'unknown',
@@ -43,9 +47,9 @@ export const snapshotFromComment = (comment: CommentV2): StoredSnapshot => {
     reportCount: comment.numReports ?? 1,
     text: comment.body,
     locked: false,
-    createdAtMs: comment.createdAt ? comment.createdAt * 1000 : undefined,
+    ...(createdAtMs !== undefined ? { createdAtMs } : {}),
     modReportCount: 0,
-  };
+  });
 };
 
 const loadTrackedIds = async (subredditId: string): Promise<string[]> => {

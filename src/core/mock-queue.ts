@@ -10,6 +10,7 @@ import {
   repeatedReportBonus,
 } from './scoring.js';
 import type { PrioritizedItem, StoredSnapshot } from './queue-types.js';
+import { toPrioritizedItem } from './prioritized-item.js';
 import { toRedditUrl } from './urls.js';
 
 const MOCK_KEYWORDS = ['spam', 'scam', 'phishing', 'giveaway', 'free money'];
@@ -51,21 +52,6 @@ const FALLBACK_SNAPSHOTS: StoredSnapshot[] = [
     createdAtMs: Date.now() - 30 * 60 * 1000,
   },
 ];
-
-const toPrioritizedItem = (
-  snap: StoredSnapshot,
-  breakdown: ReturnType<typeof computeScore>
-): PrioritizedItem => ({
-  id: snap.id,
-  kind: snap.kind,
-  title: snap.title,
-  authorName: snap.authorName,
-  permalink: snap.permalink,
-  locked: snap.locked ?? false,
-  ignoringReports: snap.ignoringReports ?? false,
-  flairText: snap.flairText,
-  breakdown,
-});
 
 const scoreSnapshotSync = (snap: StoredSnapshot, config: QueueConfig): PrioritizedItem => {
   const reportHits = Math.max(snap.reportCount, 2);

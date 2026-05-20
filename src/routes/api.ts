@@ -8,6 +8,7 @@ import type {
   QueueSettingsDto,
 } from '../shared/api.js';
 import { QUEUE_FETCH_LIMIT } from '../shared/api.js';
+import { modActionOptionsFromParts } from '../shared/exact-optional.js';
 import { loadAuditLog } from '../core/audit-log.js';
 import { REDIS_KEYS } from '../core/constants.js';
 import { loadQueueConfig } from '../core/config.js';
@@ -19,8 +20,14 @@ import {
   loadCachedPrioritizedQueue,
   prioritizeModQueue,
 } from '../core/queue.js';
+import type { PrioritizedItem } from '../core/queue-types.js';
 import { writeQueueCache } from '../core/queue-cache.js';
 import { toQueueItemDto } from '../core/queue-dto.js';
+import {
+  isQueueCacheStale,
+  isQueueRefreshInFlight,
+  scheduleQueueRefresh,
+} from '../core/queue-refresh.js';
 import { loadRemovalReasons } from '../core/removal-reasons.js';
 import { ModGuardError, requireSubredditModerator } from '../core/mod-guard.js';
 
@@ -62,34 +69,70 @@ const toSettingsDto = (
   autoRemoveMinReports: config.autoRemoveMinReports,
 });
 
-const loadQueuePayload = async (options?: { forceRebuild?: boolean }): Promise<QueueResponse> => {
+const syncBuildQueueCache = async (
+  config: Awaited<ReturnType<typeof loadQueueConfig>>['config']
+): Promise<{
+  items: PrioritizedItem[];
+  totalInQueue: number;
+  refreshedAt: string;
+}> => {
+  const scored = await buildLivePrioritizedQueue(undefined, config);
+  await writeQueueCache(scored);
+  const refreshedAt = new Date().toISOString();
+  if (context.subredditId) {
+    await redis
+      .set(REDIS_KEYS.lastRefresh(context.subredditId), refreshedAt)
+      .catch(() => undefined);
+  }
+  return {
+    items: scored.slice(0, QUEUE_FETCH_LIMIT),
+    totalInQueue: scored.length,
+    refreshedAt,
+  };
+};
+
+const loadQueuePayload = async (options?: {
+  /** When true, return cached data immediately and queue a background rebuild if stale. */
+  preferCache?: boolean;
+}): Promise<QueueResponse> => {
   const subredditName = context.subredditName ?? 'unknown';
 
-  const [{ config, fromInstall }, removalReasons, auditLog, cached] = await Promise.all([
-    loadQueueConfig(),
-    loadRemovalReasons(subredditName),
-    loadAuditLog(25),
-    options?.forceRebuild ? Promise.resolve(null) : loadCachedPrioritizedQueue(),
-  ]);
+  const [{ config, fromInstall }, removalReasons, auditLog, cached, refreshInFlight] =
+    await Promise.all([
+      loadQueueConfig(),
+      loadRemovalReasons(subredditName),
+      loadAuditLog(25),
+      loadCachedPrioritizedQueue(),
+      isQueueRefreshInFlight(),
+    ]);
 
   let items = cached?.items ?? [];
   let totalInQueue = cached?.totalInQueue ?? 0;
   let refreshedAt = cached?.refreshedAt ?? null;
+  let stale = cached ? isQueueCacheStale(refreshedAt) : false;
+  let refreshing = refreshInFlight;
 
   if (!cached) {
-    const scored = await buildLivePrioritizedQueue(undefined, config);
-    await writeQueueCache(scored);
-    items = scored.slice(0, QUEUE_FETCH_LIMIT);
-    totalInQueue = scored.length;
-    refreshedAt = new Date().toISOString();
-    if (context.subredditId) {
-      await redis
-        .set(REDIS_KEYS.lastRefresh(context.subredditId), refreshedAt)
-        .catch(() => undefined);
+    const built = await syncBuildQueueCache(config);
+    items = built.items;
+    totalInQueue = built.totalInQueue;
+    refreshedAt = built.refreshedAt;
+    stale = false;
+    refreshing = false;
+  } else if (options?.preferCache) {
+    if (stale && !refreshInFlight) {
+      refreshing = await scheduleQueueRefresh();
     }
+  } else {
+    const built = await syncBuildQueueCache(config);
+    items = built.items;
+    totalInQueue = built.totalInQueue;
+    refreshedAt = built.refreshedAt;
+    stale = false;
+    refreshing = false;
   }
 
-  return {
+  const response: QueueResponse = {
     type: 'queue',
     appVersion: context.appVersion ?? 'unknown',
     subredditName,
@@ -103,6 +146,15 @@ const loadQueuePayload = async (options?: { forceRebuild?: boolean }): Promise<Q
     auditLog,
     items: items.map(toQueueItemDto),
   };
+
+  if (stale) {
+    response.stale = true;
+  }
+  if (refreshing) {
+    response.refreshing = true;
+  }
+
+  return response;
 };
 
 api.get('/queue/mock', async (c) => {
@@ -130,7 +182,7 @@ api.get('/queue/mock', async (c) => {
 
 api.get('/queue', async (c) => {
   try {
-    return c.json(await loadQueuePayload());
+    return c.json(await loadQueuePayload({ preferCache: true }));
   } catch (error) {
     console.error('GET /api/queue failed', error);
     return c.json<QueueErrorResponse>(
@@ -145,8 +197,13 @@ api.get('/queue', async (c) => {
 
 api.post('/refresh', async (c) => {
   try {
+    const cached = await loadCachedPrioritizedQueue();
+    if (cached) {
+      await scheduleQueueRefresh();
+      return c.json(await loadQueuePayload({ preferCache: true }));
+    }
     await prioritizeModQueue();
-    return c.json(await loadQueuePayload({ forceRebuild: false }));
+    return c.json(await loadQueuePayload());
   } catch (error) {
     console.error('POST /api/refresh failed', error);
     return c.json<QueueErrorResponse>(
@@ -185,18 +242,23 @@ api.post('/items/action', async (c) => {
   }
 
   try {
-    await performModAction(id, action, {
-      note,
-      modNote,
-      removalReasonId,
-      banUsername,
-      banDurationDays:
-        typeof banDurationDays === 'number' && Number.isFinite(banDurationDays)
-          ? Math.max(0, Math.floor(banDurationDays))
-          : undefined,
+    const actionOptions = modActionOptionsFromParts({
+      ...(note !== undefined ? { note } : {}),
+      ...(modNote !== undefined ? { modNote } : {}),
+      ...(removalReasonId !== undefined ? { removalReasonId } : {}),
+      ...(banUsername !== undefined ? { banUsername } : {}),
+      ...(typeof banDurationDays === 'number' && Number.isFinite(banDurationDays)
+        ? { banDurationDays: Math.max(0, Math.floor(banDurationDays)) }
+        : {}),
     });
-    await prioritizeModQueue();
-    const queue = await loadQueuePayload({ forceRebuild: false });
+    await performModAction(id, action, actionOptions);
+    const cached = await loadCachedPrioritizedQueue();
+    if (cached) {
+      await scheduleQueueRefresh();
+    } else {
+      await prioritizeModQueue();
+    }
+    const queue = await loadQueuePayload({ preferCache: true });
     return c.json({
       type: 'mod-action',
       action,

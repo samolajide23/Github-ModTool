@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
   ModActionKind,
   ModActionOptions,
@@ -7,12 +7,41 @@ import type {
 } from '../../shared/api.js';
 import { queueApiErrorMessage } from '../../shared/api-error-message.js';
 
+const POLL_INTERVAL_MS = 3000;
+const POLL_MAX_ATTEMPTS = 40;
+
 const readQueueFetchErrorMessage = (json: unknown, httpStatus: number): string =>
   queueApiErrorMessage(json, httpStatus, {
     unauthorized: 'Sign in to Reddit to use QueueIQ.',
     forbidden: 'Only moderators of this community can use QueueIQ.',
     generic: (status) => `Could not load queue (HTTP ${status}).`,
   });
+
+const isQueueResponse = (json: unknown): json is QueueResponse =>
+  Boolean(
+    json &&
+      typeof json === 'object' &&
+      'type' in json &&
+      (json as { type: string }).type === 'queue'
+  );
+
+const isQueueError = (json: unknown): boolean =>
+  Boolean(
+    json &&
+      typeof json === 'object' &&
+      'type' in json &&
+      (json as { type: string }).type === 'error'
+  );
+
+const isNewerRefresh = (previous: string | null, next: string | null): boolean => {
+  if (!next) {
+    return false;
+  }
+  if (!previous) {
+    return true;
+  }
+  return new Date(next).getTime() > new Date(previous).getTime();
+};
 
 type QueueState = {
   data: QueueResponse | null;
@@ -45,75 +74,165 @@ export const useQueue = (onSuccess?: (message: string) => void) => {
     accessDenied: false,
   });
 
-  const load = useCallback(async (refresh = false) => {
-    setState((prev) => ({
-      ...prev,
-      loading: !refresh && prev.data === null,
-      refreshing: refresh,
-      error: null,
-      accessDenied: false,
-    }));
+  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollAttemptsRef = useRef(0);
 
-    try {
-      const response = await fetch(refresh ? '/api/refresh' : '/api/queue', {
-        method: refresh ? 'POST' : 'GET',
-        headers: { 'Content-Type': 'application/json' },
-      });
+  const stopPolling = useCallback(() => {
+    if (pollTimerRef.current) {
+      clearInterval(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+    pollAttemptsRef.current = 0;
+  }, []);
 
-      let json: unknown;
-      try {
-        json = await response.json();
-      } catch {
-        json = null;
-      }
-
-      const isQueueError =
-        json &&
-        typeof json === 'object' &&
-        'type' in json &&
-        (json as { type: string }).type === 'error';
-
-      const isQueueOk =
-        json &&
-        typeof json === 'object' &&
-        'type' in json &&
-        (json as { type: string }).type === 'queue';
-
-      if (!response.ok || isQueueError || !isQueueOk) {
-        const message = readQueueFetchErrorMessage(json, response.status);
-        const accessDenied = response.status === 401 || response.status === 403;
-        setState({
-          data: null,
-          error: message,
-          loading: false,
-          refreshing: false,
-          actingOnId: null,
-          accessDenied,
-        });
-        return;
-      }
-
-      setState({
-        data: json as QueueResponse,
+  const applyQueueData = useCallback(
+    (data: QueueResponse, options?: { keepRefreshing?: boolean }) => {
+      const stillRefreshing =
+        options?.keepRefreshing ?? Boolean(data.refreshing || data.stale);
+      setState((prev) => ({
+        data,
         error: null,
         loading: false,
-        refreshing: false,
-        actingOnId: null,
+        refreshing: stillRefreshing,
+        actingOnId: prev.actingOnId,
         accessDenied: false,
-      });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to load queue';
-      console.error('QueueIQ dashboard load failed', err);
-      setState((prev) => ({
-        ...prev,
+      }));
+      return stillRefreshing;
+    },
+    []
+  );
+
+  const fetchQueue = useCallback(async (): Promise<QueueResponse | null> => {
+    const response = await fetch('/api/queue', {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+    let json: unknown;
+    try {
+      json = await response.json();
+    } catch {
+      json = null;
+    }
+
+    if (!response.ok || isQueueError(json) || !isQueueResponse(json)) {
+      const message = readQueueFetchErrorMessage(json, response.status);
+      const accessDenied = response.status === 401 || response.status === 403;
+      setState({
+        data: null,
         error: message,
         loading: false,
         refreshing: false,
         actingOnId: null,
+        accessDenied,
+      });
+      return null;
+    }
+
+    return json;
+  }, []);
+
+  const startPollingForFreshData = useCallback(
+    (baselineRefreshedAt: string | null) => {
+      stopPolling();
+
+      pollTimerRef.current = setInterval(() => {
+        pollAttemptsRef.current += 1;
+        if (pollAttemptsRef.current > POLL_MAX_ATTEMPTS) {
+          stopPolling();
+          setState((prev) => ({ ...prev, refreshing: false }));
+          return;
+        }
+
+        void (async () => {
+          const data = await fetchQueue();
+          if (!data) {
+            stopPolling();
+            return;
+          }
+
+          const updated =
+            isNewerRefresh(baselineRefreshedAt, data.refreshedAt) ||
+            (!data.stale && !data.refreshing);
+
+          if (updated) {
+            stopPolling();
+            applyQueueData(data, { keepRefreshing: false });
+            return;
+          }
+
+          applyQueueData(data, { keepRefreshing: true });
+        })();
+      }, POLL_INTERVAL_MS);
+    },
+    [applyQueueData, fetchQueue, stopPolling]
+  );
+
+  useEffect(() => () => stopPolling(), [stopPolling]);
+
+  const load = useCallback(
+    async (refresh = false) => {
+      setState((prev) => ({
+        ...prev,
+        loading: !refresh && prev.data === null,
+        refreshing: refresh || prev.refreshing,
+        error: null,
         accessDenied: false,
       }));
-    }
-  }, []);
+
+      try {
+        const response = await fetch(refresh ? '/api/refresh' : '/api/queue', {
+          method: refresh ? 'POST' : 'GET',
+          headers: { 'Content-Type': 'application/json' },
+        });
+
+        let json: unknown;
+        try {
+          json = await response.json();
+        } catch {
+          json = null;
+        }
+
+        if (!response.ok || isQueueError(json) || !isQueueResponse(json)) {
+          const message = readQueueFetchErrorMessage(json, response.status);
+          const accessDenied = response.status === 401 || response.status === 403;
+          stopPolling();
+          setState({
+            data: null,
+            error: message,
+            loading: false,
+            refreshing: false,
+            actingOnId: null,
+            accessDenied,
+          });
+          return;
+        }
+
+        const data = json;
+        const needsPoll = applyQueueData(data, {
+          keepRefreshing: Boolean(data.refreshing || data.stale),
+        });
+        if (needsPoll) {
+          startPollingForFreshData(data.refreshedAt);
+        } else {
+          stopPolling();
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Failed to load queue';
+        console.error('QueueIQ dashboard load failed', err);
+        stopPolling();
+        setState((prev) => ({
+          ...prev,
+          error: message,
+          loading: false,
+          refreshing: false,
+          actingOnId: null,
+          accessDenied: false,
+        }));
+      }
+    },
+    [applyQueueData, startPollingForFreshData, stopPolling]
+  );
 
   useEffect(() => {
     void load(false);
@@ -138,11 +257,7 @@ export const useQueue = (onSuccess?: (message: string) => void) => {
 
         const json: unknown = await response.json().catch(() => null);
 
-        const isErr =
-          json &&
-          typeof json === 'object' &&
-          'type' in json &&
-          (json as { type: string }).type === 'error';
+        const isErr = isQueueError(json);
         const isOk =
           json &&
           typeof json === 'object' &&
@@ -162,14 +277,15 @@ export const useQueue = (onSuccess?: (message: string) => void) => {
           return;
         }
 
-        setState({
-          data: (json as ModActionResponse).queue,
-          error: null,
-          loading: false,
-          refreshing: false,
-          actingOnId: null,
-          accessDenied: false,
+        const queue = (json as ModActionResponse).queue;
+        const baseline = state.data?.refreshedAt ?? null;
+        const needsPoll = applyQueueData(queue, {
+          keepRefreshing: Boolean(queue.refreshing || queue.stale),
         });
+        if (needsPoll) {
+          startPollingForFreshData(baseline);
+        }
+
         onSuccess?.(`${ACTION_LABELS[action]} — queue updated`);
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Mod action failed';
@@ -181,7 +297,7 @@ export const useQueue = (onSuccess?: (message: string) => void) => {
         }));
       }
     },
-    [onSuccess]
+    [applyQueueData, onSuccess, startPollingForFreshData, state.data?.refreshedAt]
   );
 
   return {

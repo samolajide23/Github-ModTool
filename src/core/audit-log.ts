@@ -1,5 +1,6 @@
 import { context, redis } from '@devvit/web/server';
 import type { ModActionKind } from '../shared/api.js';
+import { auditEntryFromParts } from '../shared/exact-optional.js';
 import { REDIS_KEYS } from './constants.js';
 
 export type AuditEntry = {
@@ -23,13 +24,13 @@ export const appendAuditLog = async (
   }
 
   const mod = context.username ?? context.userId ?? 'unknown';
-  const entry: AuditEntry = {
+  const entry: AuditEntry = auditEntryFromParts({
     at: new Date().toISOString(),
     mod: String(mod),
     action,
     targetId,
-    detail: detail?.slice(0, 500),
-  };
+    ...(detail !== undefined ? { detail: detail.slice(0, 500) } : {}),
+  });
 
   try {
     const key = REDIS_KEYS.auditLog(subredditId);

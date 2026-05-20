@@ -7,7 +7,20 @@ export default defineConfig([
   tseslint.configs.recommended,
   {
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
+    files: ['src/client/**/*.{ts,tsx}'],
+    languageOptions: {
+      ecmaVersion: 2023,
+      globals: { ...globals.node, ...globals.browser },
+      parserOptions: {
+        project: ['./tsconfig.json'],
+        tsconfigRootDir: import.meta.dirname,
+      },
+    },
+  },
+  {
+    extends: [js.configs.recommended, ...tseslint.configs.recommended],
     files: ['src/**/*.{ts,tsx,mjs,cjs,js}'],
+    ignores: ['src/client/**/*'],
     languageOptions: {
       ecmaVersion: 2023,
       globals: globals.node,

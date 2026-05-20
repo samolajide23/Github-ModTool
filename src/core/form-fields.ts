@@ -7,10 +7,15 @@ export const readOnlyResultsForm = (
   title: string,
   body: string,
   options?: { acceptLabel?: string; cancelLabel?: string }
-): Form => ({
-  title,
-  description: body,
-  acceptLabel: options?.acceptLabel ?? 'Close',
-  cancelLabel: options?.cancelLabel,
-  fields: [],
-});
+): Form => {
+  const form: Form = {
+    title,
+    description: body,
+    acceptLabel: options?.acceptLabel ?? 'Close',
+    fields: [],
+  };
+  if (options?.cancelLabel !== undefined) {
+    form.cancelLabel = options.cancelLabel;
+  }
+  return form;
+};

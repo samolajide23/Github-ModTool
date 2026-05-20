@@ -16,8 +16,13 @@ export const parseFlairRules = (raw: string): Map<string, number> => {
     if (!match) {
       continue;
     }
-    const label = match[1].trim().toLowerCase();
-    const points = Number.parseFloat(match[2]);
+    const labelPart = match[1];
+    const pointsPart = match[2];
+    if (labelPart === undefined || pointsPart === undefined) {
+      continue;
+    }
+    const label = labelPart.trim().toLowerCase();
+    const points = Number.parseFloat(pointsPart);
     if (label && Number.isFinite(points)) {
       rules.set(label, clampWeight(points));
     }

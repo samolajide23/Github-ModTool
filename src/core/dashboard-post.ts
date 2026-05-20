@@ -1,3 +1,4 @@
+import { T3 } from '@devvit/shared-types/tid.js';
 import { context, redis, reddit } from '@devvit/web/server';
 import { FALLBACK_DASHBOARD_POST_ID } from './dashboard-post-id.generated.js';
 import { REDIS_KEYS } from './constants.js';
@@ -45,10 +46,12 @@ const resolvePostRef = async (postId: string): Promise<DashboardPostRef> => {
   }
 
   try {
-    const post = await reddit.getPostById(postId);
+    const post = await reddit.getPostById(
+      postId.startsWith('t3_') ? (postId as `t3_${string}`) : T3(postId)
+    );
     return {
       id: post.id,
-      url: post.url ?? getDashboardPostUrl(post.id, subredditName),
+      url: post.url ?? getDashboardPostUrl(post.id as `t3_${string}`, subredditName),
     };
   } catch (error) {
     console.error(`getPostById failed for dashboard ${postId}, using direct URL`, error);

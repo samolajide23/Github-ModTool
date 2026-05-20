@@ -11,7 +11,7 @@
     "dev": "devvit playtest",
     "launch": "npm run build && node scripts/publish-public.mjs",
     "publish:public": "node scripts/publish-public.mjs",
-    "lint": "eslint 'src/**/*.{ts,tsx}'",
+    "lint": "eslint src",
     "login": "devvit login",
     "prettier": "prettier --write .",
     "test": "vitest run --passWithNoTests",

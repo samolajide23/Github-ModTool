@@ -118,7 +118,7 @@ const readRawInstallSettings = async (): Promise<InstallSettings> => {
   const merged: InstallSettings = { ...fromAll };
   for (const [key, value] of fromEach) {
     if (value !== undefined && value !== null && value !== '') {
-      merged[key] = value as InstallSettings[typeof key];
+      (merged as Record<string, string | number>)[key] = value as string | number;
     }
   }
 

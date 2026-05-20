@@ -10,11 +10,10 @@ import {
 } from '../shared/api.js';
 import { formatWeightRule } from '../shared/format-weight-rule.js';
 import { formatScoreBreakdownLines } from '../shared/format-score-breakdown.js';
-import { formatScoreNumber, roundScoreValue } from '../shared/format-score-number.js';
+import { formatScoreNumber } from '../shared/format-score-number.js';
 import {
   DEFAULT_QUEUE_SORT,
   QUEUE_SORT_OPTIONS,
-  queueSortSubtitle,
   sortQueueItems,
   type QueueSortMode,
 } from '../shared/sort-queue-items.js';
@@ -49,20 +48,38 @@ type PendingConfirm = {
   action: ConfirmableAction;
 };
 
-const QueueFilters = ({
-  kindFilter,
-  minScore,
+const QueueSortSelect = ({
   sortMode,
-  onKindChange,
-  onMinScoreChange,
   onSortChange,
 }: {
-  kindFilter: KindFilter;
-  minScore: number;
   sortMode: QueueSortMode;
-  onKindChange: (v: KindFilter) => void;
-  onMinScoreChange: (v: number) => void;
   onSortChange: (v: QueueSortMode) => void;
+}) => (
+  <div className="tool-section__sort">
+    <label className="tool-section__sort-label" htmlFor="queue-sort-select">
+      Sort
+    </label>
+    <select
+      id="queue-sort-select"
+      className="tool-section__sort-select"
+      value={sortMode}
+      onChange={(e) => onSortChange(e.target.value as QueueSortMode)}
+    >
+      {QUEUE_SORT_OPTIONS.map((option) => (
+        <option key={option.value} value={option.value}>
+          {option.label}
+        </option>
+      ))}
+    </select>
+  </div>
+);
+
+const QueueKindFilter = ({
+  kindFilter,
+  onKindChange,
+}: {
+  kindFilter: KindFilter;
+  onKindChange: (v: KindFilter) => void;
 }) => {
   const onPostsClick = () => {
     onKindChange(kindFilter === 'post' ? 'all' : 'post');
@@ -72,98 +89,28 @@ const QueueFilters = ({
     onKindChange(kindFilter === 'comment' ? 'all' : 'comment');
   };
 
-  const clampScore = (n: number) =>
-    roundScoreValue(Math.min(999_999, Math.max(0, Number.isFinite(n) ? n : 0)));
-
   return (
-    <div className="queue-filters">
-      <div className="queue-filters__kinds" role="tablist" aria-label="Posts or comments">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={kindFilter === 'post'}
-          title="Show posts only. Tap again to show all types."
-          className={`queue-filters__kind${kindFilter === 'post' ? ' queue-filters__kind--active' : ''}`}
-          onClick={onPostsClick}
-        >
-          Posts
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={kindFilter === 'comment'}
-          title="Show comments only. Tap again to show all types."
-          className={`queue-filters__kind${kindFilter === 'comment' ? ' queue-filters__kind--active' : ''}`}
-          onClick={onCommentsClick}
-        >
-          Comments
-        </button>
-      </div>
-      <div className="queue-filters__sort">
-        <label className="queue-filters__sort-label" htmlFor="queue-sort-select">
-          Sort
-        </label>
-        <select
-          id="queue-sort-select"
-          className="queue-filters__sort-select"
-          value={sortMode}
-          onChange={(e) => onSortChange(e.target.value as QueueSortMode)}
-        >
-          {QUEUE_SORT_OPTIONS.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-      </div>
-      <div className="queue-filters__min-score">
-        <div className="queue-filters__min-score-head">
-          <span className="queue-filters__min-score-label" id="queue-min-score-label">
-            Minimum score
-          </span>
-          <span className="queue-filters__min-score-hint" id="queue-min-score-hint">
-            Only show items at or above this total
-          </span>
-        </div>
-        <div
-          className="queue-filters__stepper"
-          role="group"
-          aria-labelledby="queue-min-score-label"
-          aria-describedby="queue-min-score-hint"
-        >
-          <button
-            type="button"
-            className="queue-filters__stepper-btn"
-            aria-label="Decrease minimum score"
-            disabled={minScore <= 0}
-            onClick={() => onMinScoreChange(clampScore(minScore - 0.5))}
-          >
-            −
-          </button>
-          <input
-            id="queue-min-score-input"
-            className="queue-filters__score-input"
-            type="number"
-            inputMode="decimal"
-            min={0}
-            max={999999}
-            step="any"
-            value={minScore}
-            aria-valuemin={0}
-            aria-valuemax={999999}
-            aria-valuenow={minScore}
-            onChange={(e) => onMinScoreChange(clampScore(Number(e.target.value)))}
-          />
-          <button
-            type="button"
-            className="queue-filters__stepper-btn"
-            aria-label="Increase minimum score"
-            onClick={() => onMinScoreChange(clampScore(minScore + 0.5))}
-          >
-            +
-          </button>
-        </div>
-      </div>
+    <div className="tool-section__kinds" role="tablist" aria-label="Posts or comments">
+      <button
+        type="button"
+        role="tab"
+        aria-selected={kindFilter === 'post'}
+        title="Show posts only. Tap again to show all types."
+        className={`tool-section__kind${kindFilter === 'post' ? ' tool-section__kind--active' : ''}`}
+        onClick={onPostsClick}
+      >
+        Posts
+      </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={kindFilter === 'comment'}
+        title="Show comments only. Tap again to show all types."
+        className={`tool-section__kind${kindFilter === 'comment' ? ' tool-section__kind--active' : ''}`}
+        onClick={onCommentsClick}
+      >
+        Comments
+      </button>
     </div>
   );
 };
@@ -309,24 +256,17 @@ const formatQueueMeta = (
   filteredCount: number
 ): string => {
   const totalInQueue = data.totalInQueue ?? data.itemCount;
-  const parts = [
-    `r/${data.subredditName}`,
-    `${visibleCount} shown`,
-  ];
 
-  if (filteredCount !== visibleCount) {
-    parts.push(`${filteredCount} match filters`);
+  let count: string;
+  if (visibleCount < filteredCount) {
+    count = `${visibleCount} of ${filteredCount}`;
+  } else if (filteredCount < totalInQueue) {
+    count = `${filteredCount} of ${totalInQueue}`;
+  } else {
+    count = `${filteredCount} in queue`;
   }
 
-  parts.push(`${totalInQueue} in queue`);
-
-  parts.push(`v${data.appVersion}`);
-
-  if (data.refreshedAt) {
-    parts.push(`Updated ${formatRefreshed(data.refreshedAt)}`);
-  }
-
-  return parts.join(' · ');
+  return `r/${data.subredditName} · ${count}`;
 };
 
 const SettingsSummary = ({
@@ -441,19 +381,29 @@ const ToolSection = ({
   id,
   title,
   subtitle,
+  headerBelow,
+  headerActions,
   children,
 }: {
   id: string;
   title: string;
   subtitle?: string;
+  headerBelow?: ReactNode;
+  headerActions?: ReactNode;
   children: ReactNode;
 }) => (
   <section className="tool-section" aria-labelledby={id}>
-    <header className="tool-section__header">
-      <h2 className="tool-section__title" id={id}>
-        {title}
-      </h2>
-      {subtitle && <p className="tool-section__subtitle">{subtitle}</p>}
+    <header
+      className={`tool-section__header${headerActions ? ' tool-section__header--split' : ''}`}
+    >
+      <div className="tool-section__header-text">
+        <h2 className="tool-section__title" id={id}>
+          {title}
+        </h2>
+        {headerBelow}
+        {subtitle && <p className="tool-section__subtitle">{subtitle}</p>}
+      </div>
+      {headerActions}
     </header>
     {children}
   </section>
@@ -483,7 +433,6 @@ const DashboardView = ({
   performAction,
 }: DashboardViewProps) => {
   const [kindFilter, setKindFilter] = useState<KindFilter>('all');
-  const [minScore, setMinScore] = useState(0);
   const [sortMode, setSortMode] = useState<QueueSortMode>(DEFAULT_QUEUE_SORT);
   const [visibleLimit, setVisibleLimit] = useState(QUEUE_PAGE_SIZE);
   const [pending, setPending] = useState<PendingConfirm | null>(null);
@@ -495,20 +444,17 @@ const DashboardView = ({
 
   useEffect(() => {
     setVisibleLimit(QUEUE_PAGE_SIZE);
-  }, [data?.refreshedAt, kindFilter, minScore, sortMode]);
+  }, [data?.refreshedAt, kindFilter, sortMode]);
 
   const filteredItems = useMemo(() => {
     if (!data) {
       return [];
     }
-    const filtered = data.items.filter((item) => {
-      if (kindFilter !== 'all' && item.kind !== kindFilter) {
-        return false;
-      }
-      return item.breakdown.total >= minScore;
-    });
+    const filtered = data.items.filter(
+      (item) => kindFilter === 'all' || item.kind === kindFilter
+    );
     return sortQueueItems(filtered, sortMode);
-  }, [data, kindFilter, minScore, sortMode]);
+  }, [data, kindFilter, sortMode]);
 
   const visibleItems = useMemo(
     () => filteredItems.slice(0, visibleLimit),
@@ -605,19 +551,17 @@ const DashboardView = ({
       <ToolSection
         id="priority-queue"
         title="Queue"
-        subtitle={queueSortSubtitle(sortMode)}
+        headerBelow={
+          !loading && data ? (
+            <QueueKindFilter kindFilter={kindFilter} onKindChange={setKindFilter} />
+          ) : undefined
+        }
+        headerActions={
+          !loading && data ? (
+            <QueueSortSelect sortMode={sortMode} onSortChange={setSortMode} />
+          ) : undefined
+        }
       >
-        {!loading && data && (
-          <QueueFilters
-            kindFilter={kindFilter}
-            minScore={minScore}
-            sortMode={sortMode}
-            onKindChange={setKindFilter}
-            onMinScoreChange={setMinScore}
-            onSortChange={setSortMode}
-          />
-        )}
-
         {loading && <p className="loading-state">Loading queue…</p>}
 
         {error && !loading && (

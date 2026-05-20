@@ -10,6 +10,7 @@ import { getInstallSettingsUrl } from '../../shared/install-settings-url.js';
 import { buildMockPrioritizedQueue } from '../../core/mock-queue.js';
 import { toQueueItemDto } from '../../core/queue-dto.js';
 import type { AuditEntryDto } from '../../shared/api.js';
+import { auditEntryFromParts } from '../../shared/exact-optional.js';
 
 const ACTION_LABELS: Record<ModActionKind, string> = {
   approve: 'Approved',
@@ -113,20 +114,22 @@ export const useMockQueue = (onSuccess?: (message: string) => void) => {
         return { ...prev, refreshedAt: new Date().toISOString() };
       });
 
+      const detail = [
+        options.note && `note: ${options.note}`,
+        options.modNote && `mod: ${options.modNote}`,
+        options.banDurationDays && `ban ${options.banDurationDays}d`,
+      ]
+        .filter(Boolean)
+        .join('; ');
+
       setAuditLog((log) => [
-        {
+        auditEntryFromParts({
           at: new Date().toISOString(),
           mod: 'demo_mod',
           action,
           targetId: id,
-          detail: [
-            options.note && `note: ${options.note}`,
-            options.modNote && `mod: ${options.modNote}`,
-            options.banDurationDays && `ban ${options.banDurationDays}d`,
-          ]
-            .filter(Boolean)
-            .join('; ') || undefined,
-        },
+          ...(detail ? { detail } : {}),
+        }),
         ...log,
       ].slice(0, 25));
 

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { ModActionOptions, QueueItemDto, RemovalReasonDto } from '../../shared/api.js';
+import { modActionOptionsFromParts } from '../../shared/exact-optional.js';
 
 export type ConfirmableAction = 'remove' | 'spam' | 'ban-user';
 
@@ -46,17 +47,24 @@ export const ModActionDialog = ({
   const [removalReasonId, setRemovalReasonId] = useState('');
 
   const handleSubmit = () => {
-    onConfirm({
-      note: action === 'ban-user' ? note : undefined,
-      modNote: action !== 'ban-user' ? modNote || undefined : undefined,
-      removalReasonId:
-        action === 'remove' || action === 'spam'
-          ? removalReasonId || undefined
-          : undefined,
-      banUsername: action === 'ban-user' ? item.authorName.replace(/^u\//, '') : undefined,
-      banDurationDays:
-        action === 'ban-user' && banDurationDays > 0 ? banDurationDays : undefined,
-    });
+    const parts: Parameters<typeof modActionOptionsFromParts>[0] = {};
+    if (action === 'ban-user') {
+      if (note) {
+        parts.note = note;
+      }
+      parts.banUsername = item.authorName.replace(/^u\//, '');
+      if (banDurationDays > 0) {
+        parts.banDurationDays = banDurationDays;
+      }
+    } else {
+      if (modNote) {
+        parts.modNote = modNote;
+      }
+      if ((action === 'remove' || action === 'spam') && removalReasonId) {
+        parts.removalReasonId = removalReasonId;
+      }
+    }
+    onConfirm(modActionOptionsFromParts(parts));
   };
 
   return (

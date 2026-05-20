@@ -19,7 +19,11 @@ export const mapPool = async <T, R>(
       if (index >= items.length) {
         return;
       }
-      results[index] = await mapper(items[index], index);
+      const item = items[index];
+      if (item === undefined) {
+        return;
+      }
+      results[index] = await mapper(item, index);
     }
   };
 

@@ -87,6 +87,10 @@ export type QueueResponse = {
   /** @deprecated Prefer `totalInQueue`. Kept for older clients. */
   itemCount: number;
   refreshedAt: string | null;
+  /** Cached payload is older than the stale threshold; a rebuild may be queued. */
+  stale?: boolean;
+  /** A full queue rebuild is running or queued in the background. */
+  refreshing?: boolean;
   settings: QueueSettingsDto;
   settingsUrl: string;
   settingsFromInstall: boolean;

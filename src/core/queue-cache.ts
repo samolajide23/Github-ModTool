@@ -1,6 +1,5 @@
 import { context, redis } from '@devvit/web/server';
 import { QUEUE_FETCH_LIMIT } from '../shared/api.js';
-import { REDIS_KEYS } from './constants.js';
 import type { PrioritizedItem } from './queue-types.js';
 
 export type CachedQueuePayload = {
